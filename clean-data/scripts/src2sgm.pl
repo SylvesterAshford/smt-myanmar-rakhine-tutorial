@@ -7,7 +7,7 @@ use strict;
 my $src = shift;
 
 print "<srcset setid=\"Myanmar-Rakhine_data\" srclang=\"any\">\n";
-print "<doc docid=\"none\" genre=\"8000\" origlang=\"$src\">\n";
+print "<doc docid=\"none\" genre=\"100\" origlang=\"$src\">\n";
 
 #open FILE, "/home/ros/experiment/my-rk/data/test.$src" or die;
 open FILE, "../test.$src" or die;

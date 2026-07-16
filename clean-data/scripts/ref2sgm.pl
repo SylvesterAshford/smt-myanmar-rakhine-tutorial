@@ -8,7 +8,7 @@ my $trg = shift;
 
 #print "<refset trglang=\"$trg\" setid=\"sl_data\" srclang=\"any\">\n";
 print "<refset trglang=\"$trg\" setid=\"Myanmar-Rakhine_data\" srclang=\"any\">\n";
-print "<doc sysid=\"ref\" docid=\"none\" genre=\"8000\" origlang=\"any\">\n";
+print "<doc sysid=\"ref\" docid=\"none\" genre=\"100\" origlang=\"any\">\n";
 
 #open FILE, "/home/ros/experiment/my-rk/data/test.$trg" or die;
 open FILE, "../test.$trg" or die;

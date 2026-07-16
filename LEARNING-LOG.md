@@ -142,6 +142,50 @@ in one sitting; everything after it is minutes, not hours.
 
 ---
 
+## Part 3.5 — Bug found while running on Colab (SGM section) and the fix
+
+**Symptom chain** (from the actual Colab run):
+
+1. `SyntaxError: invalid syntax` pointing at `use strict;` (a *Perl* line!) —
+   the first SGM cell had `!mkdir -p ...` **above** `%%writefile`. Cell magics like
+   `%%writefile` only work as the **very first line** of a cell; with anything above it,
+   IPython runs the whole cell as *Python* and chokes on the Perl code.
+2. Because that cell died, the `mkdir` never ran → the next two `%%writefile` cells
+   failed with `FileNotFoundError` (`%%writefile` writes a file but does **not** create
+   parent directories).
+
+**Lesson:** one broken cell can *cause* the next errors — always fix the **first** error
+in a chain before touching the later ones.
+
+**The fix — stop hand-writing files that already exist upstream.** The three Perl
+scripts live in the MTRSS repo (`pbsmt/data/test-sgm/`) and — because that repo *is* the
+Myanmar–Rakhine experiment — they already contain `Myanmar-Rakhine_data` and the right
+relative paths. So the three fragile `%%writefile` cells became one simple cell:
+
+```python
+!mkdir -p /home/ye/exp/SMT-NMT_tutorial/clean-data/scripts
+%cd /home/ye/exp/SMT-NMT_tutorial/clean-data/scripts
+
+base = "https://raw.githubusercontent.com/ye-kyaw-thu/MTRSS/master/pbsmt/data/test-sgm"
+!wget -q -O generate_sgms.pl $base/generate_sgms.pl
+!wget -q -O src2sgm.pl $base/src2sgm.pl
+!wget -q -O ref2sgm.pl $base/ref2sgm.pl
+!chmod +x *.pl
+```
+
+Details worth noticing:
+- `wget -O <name>` makes the cell **rerun-safe** (overwrites instead of creating `.1` copies).
+- `chmod +x` is required because upstream `generate_sgms.pl` invokes `./ref2sgm.pl`
+  directly (no `perl` prefix), which needs the execute bit.
+- Verified end-to-end locally: the downloaded scripts produced all 4 sgm files
+  (`test.{my,rk}.{src,ref}.sgm`) with 100 `<seg>` entries each.
+
+**Meta-lesson:** *prefer downloading a canonical file over re-typing it.* Embedded copies
+drift and each `%%writefile` is a chance for a transcription bug; a URL to the author's
+repo is one line and always matches the source.
+
+---
+
 ## Part 4 — What to learn from this exercise (the transferable skills)
 
 1. **Interface thinking.** A dataset, like an API, has a contract: file names, sizes,
