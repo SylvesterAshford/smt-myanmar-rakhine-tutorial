@@ -184,6 +184,44 @@ Details worth noticing:
 drift and each `%%writefile` is a chance for a transcription bug; a URL to the author's
 repo is one line and always matches the source.
 
+## Part 3.6 — Second Colab bug: `generate_sgms.pl` runs but produces nothing
+
+**Symptom:** `!perl ./generate_sgms.pl` finishes with no error, but `!ls *sgm` says
+*No such file or directory*.
+
+**Root cause — a silent failure + hidden server state:**
+
+1. `generate_sgms.pl` finds languages by globbing `../train.[a-z][a-z]`. If nothing
+   matches, `@langs` is empty, the loop body never runs, and the script **exits happily
+   with zero output**. Perl backticks also swallow any sub-script errors. No error ≠ success.
+2. Why did nothing match? The notebook's cleaning flow does `mv *.*  ./normalize` (moving
+   **all six** corpus files in) but only copies back `*.clean` — the Burmese side. The
+   Rakhine/Thai side **never returns to `clean-data/`** in any notebook cell.
+3. The proof is in the instructor's own saved outputs: their `tree` shows `clean-data/`
+   holding only `train.my, dev.my, test.my`… yet their SGM step produced both languages.
+   The `.th` files existed on their **server from outside the notebook** — hidden state
+   that a fresh Colab runtime doesn't have.
+
+**Fixes applied to the notebook:**
+
+- The copy-back cell now restores both sides:
+  ```bash
+  !cp ./normalize/*.clean .   # cleaned Burmese
+  !cp ./normalize/*.rk .      # Rakhine side (was left stranded in normalize/)
+  ```
+- A **self-healing guard cell** was added right before `!perl ./generate_sgms.pl`: it
+  checks all 6 files exist in `clean-data/` and restores any missing one (preferring the
+  cleaned version from `normalize/`, falling back to raw `data/`). This also makes the
+  section survive a Colab runtime restart where earlier cells' work was lost.
+
+**Lessons:**
+- **"No error" is not "it worked."** Shell-outs in backticks and empty globs fail
+  silently — always verify the *artifact* (here: `ls *sgm`), not the exit banner.
+- **Notebooks can depend on invisible state.** If a cell works for the author but not on
+  a fresh machine, diff what's *on disk* at that point, not what's *in the notebook*.
+- **Make preconditions explicit.** A 10-line guard cell that checks-and-restores inputs
+  converts a silent downstream failure into either success or a loud, early message.
+
 ---
 
 ## Part 4 — What to learn from this exercise (the transferable skills)
