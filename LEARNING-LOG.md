@@ -222,6 +222,43 @@ repo is one line and always matches the source.
 - **Make preconditions explicit.** A 10-line guard cell that checks-and-restores inputs
   converts a silent downstream failure into either success or a loud, early message.
 
+## Part 3.7 — Third Colab bug: `%cd baseline/rk-my/` → "No such file or directory"
+
+**Symptom:** after `%cd ..` put us at the tutorial root, the next cell's relative
+`%cd baseline/rk-my/` failed — `baseline/` actually lives inside `pbsmt/`.
+
+**Root cause — relative paths written against an undocumented working directory.**
+A notebook's cwd is **global mutable state**: every `%cd` changes it for all later cells.
+The instructor's saved outputs prove they weren't running linearly — their `%cd ..`
+printed `.../pbsmt` (so their cwd had been `pbsmt/baseline`, set by hand or by re-running
+cells out of order). Relative `%cd`s recorded from such a session silently encode that
+session's history.
+
+**Diagnosis technique worth stealing:** simulate the cwd flow *offline*. Walk every
+`%cd` line top to bottom with `posixpath.join`/`normpath` and print the resulting
+directory — no Colab needed. This exposed **four** broken relative `%cd`s in one pass
+(including the one that had been quietly creating a stray `clean-data/scripts/pbsmt/`
+folder later in the notebook):
+
+| Cell command | Where it actually landed (linear run) | Intended |
+|---|---|---|
+| `%cd ../clean-data/` | `clean-data/clean-data` ✗ | `clean-data` |
+| `%cd baseline/rk-my/` | `<root>/baseline/rk-my` ✗ | `pbsmt/baseline/rk-my` |
+| `%cd ../../` | `pbsmt/baseline/rk-my` ✗ | tutorial root |
+| `%cd ./pbsmt/` | `clean-data/scripts/pbsmt` ✗ | `<root>/pbsmt` |
+
+**Fix:** all four became absolute paths. Note the failure asymmetry: a failed `%cd`
+*keeps the old cwd* and the notebook keeps running — so the error often surfaces cells
+later, as a missing file or a mysteriously created directory, far from the real cause.
+
+**Lessons:**
+- In notebooks, prefer **absolute paths in every `%cd`** — relative ones embed the
+  author's session history, which a fresh linear run doesn't share.
+- When a path error makes no sense, don't debug the failing cell — **reconstruct the
+  cwd history** that led to it.
+- You can verify this class of bug *statically* (the offline cwd walk) — faster and more
+  complete than re-running the notebook to find them one at a time.
+
 ---
 
 ## Part 4 — What to learn from this exercise (the transferable skills)
