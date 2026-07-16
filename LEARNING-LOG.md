@@ -295,6 +295,32 @@ instructor does by hand two sections later.
   instructor could run this cell *because* their earlier steps had failed. A fixed-up
   linear run changes which states each later cell sees.
 
+## Part 3.9 — "Missing" graph.1.png after training: not a bug at all
+
+**Symptom:** training completed, but `!ls *.png` in `steps/1` found nothing, while the
+instructor's saved output shows a `graph.1.png` there.
+
+**Root cause:** `run-baseline.pl` invokes `experiment.perl -config ... -exec -no-graph`
+— and checking the **upstream MTRSS script confirms the same flag**. With `-no-graph`,
+Moses EMS skips rendering the pipeline diagram. The instructor's png came from their own
+server environment (an invocation without the flag, plus graphviz installed) — one more
+artifact of their session, not of the notebook's code.
+
+**Triage lesson — classify before fixing.** Three kinds of "the file isn't there":
+1. *Your pipeline broke* (Parts 3.5–3.8) → fix the pipeline.
+2. *The author's environment differed* → decide whether the artifact matters.
+3. *The artifact is decorative* → it must never block the run.
+This one is (2)+(3): the graph is only a picture of the EMS step DAG; the model,
+tuning, and BLEU are completely unaffected.
+
+**Fix:** the `!ls *.png` cell became a render-or-skip cell — if EMS left a `graph.*`
+dot description it installs graphviz and renders the png; otherwise it prints that
+skipping is fine and points to the evaluation cells. Either way the cell succeeds.
+
+**Lesson:** when a shared notebook errors, first ask *"is the missing thing an input,
+an output, or an illustration?"* Only inputs and outputs deserve pipeline surgery;
+illustrations deserve a graceful fallback.
+
 ---
 
 ## Part 4 — What to learn from this exercise (the transferable skills)
