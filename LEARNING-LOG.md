@@ -259,6 +259,42 @@ later, as a missing file or a mysteriously created directory, far from the real 
 - You can verify this class of bug *statically* (the offline cwd walk) — faster and more
   complete than re-running the notebook to find them one at a time.
 
+## Part 3.8 — Fourth Colab bug: `generate_configs.pl` can't run twice
+
+**Symptom (two errors stacked, again):** in the "Notes" section, `!ls *` and
+`!perl ./generate_configs.pl` both failed with *No such file or directory* — the session
+was sitting inside the stray `clean-data/scripts/pbsmt/` folder (fallout of the relative
+`%cd ./pbsmt/` from Part 3.7, before the fix was applied to that session).
+
+**The hidden second trap:** even from the correct `pbsmt/` directory, the script dies,
+because of this guard:
+
+```perl
+die("$smtpath/$expt") if (-d "$smtpath/$expt");   # refuse if baseline/ exists
+```
+
+That's a deliberate **safety guard** — an EMS `baseline/` can hold hours of training
+output, and the author didn't want a re-run to clobber a finished experiment. But it
+makes the cell **non-idempotent**: it only works the *first* time. The instructor's own
+outputs confirm they never hit it here (their earlier attempts had failed before
+creating `baseline/`), and that they manually did `%rm -r baseline/` when *they*
+needed to regenerate later. A linear runner who succeeded earlier arrives with
+`baseline/` present and dies.
+
+**Fix:** the Notes-section cell now clears the stale config-only `baseline/` before
+regenerating (`rm -rf ./baseline` + `generate_configs.pl`) — matching what the
+instructor does by hand two sections later.
+
+**Lessons:**
+- **Idempotence matters in notebooks.** Cells get re-run. A cell that only works once
+  (create-if-not-exists, die-if-exists, `wget` without `-O`) will eventually bite someone.
+- **Die-if-exists guards protect data but punish retries.** When you wrap such a tool in
+  a re-runnable cell, decide explicitly which state is disposable (here: a `baseline/`
+  containing only generated configs) and clear exactly that.
+- **Whether a "shared" notebook works can depend on the author's failures.** The
+  instructor could run this cell *because* their earlier steps had failed. A fixed-up
+  linear run changes which states each later cell sees.
+
 ---
 
 ## Part 4 — What to learn from this exercise (the transferable skills)
