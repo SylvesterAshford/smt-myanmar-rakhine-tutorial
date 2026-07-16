@@ -1,0 +1,10 @@
+# Local Claude Code settings (machine-specific permissions)
+.claude/
+
+# Instructor's original notebook run — contains saved outputs with samples of
+# the NON-PUBLIC Myanmar-Thai corpus. Keep local only.
+SMT-Tutorial-for-AI-Class-1.ORIGINAL.ipynb
+
+# OS / editor junk
+.DS_Store
+.ipynb_checkpoints/
