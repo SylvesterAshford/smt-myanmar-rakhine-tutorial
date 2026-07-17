@@ -321,6 +321,107 @@ skipping is fine and points to the evaluation cells. Either way the cell succeed
 an output, or an illustration?"* Only inputs and outputs deserve pipeline surgery;
 illustrations deserve a graceful fallback.
 
+## Part 3.10 — The big one: why training produced no results (GIZA++ segfault)
+
+**Symptom:** `run-baseline.pl` "succeeds" (exit 0, quiet output), but no
+`evaluation/` folders, no BLEU files — the failure that stopped the whole tutorial.
+
+**How it was diagnosed — full pipeline replication.** Instead of guessing at Colab, the
+entire notebook pipeline was replicated in an Ubuntu 22.04 Docker container (same OS as
+Colab, same paths, same embedded scripts, same corpus): apt → build Moses from source →
+build GIZA++ → stage corpus → SGM generation → `generate_configs.pl` → `run-baseline.pl`.
+The failure reproduced *exactly*: everything green until training, then no BLEU.
+
+**Following the evidence chain:**
+1. `run1.log` (which `tee` captures even though the screen stays quiet) showed:
+   `step TRAINING:run-giza crashed` for both directions.
+2. The step's own log, `steps/1/TRAINING_run-giza.1.STDERR`, ended with:
+   `died with signal 11` — GIZA++ segfaulting the moment it starts.
+3. Compiler flags were the obvious suspect (GIZA++ is 2003-era C++) — but rebuilding
+   with `-O2`, `-fno-strict-aliasing`, even `-O0` **still crashed**. That ruled out
+   optimizer-induced UB and proved it was a *runtime* trigger.
+4. `gdb` backtrace on a debug build gave the answer in one line:
+   ```
+   #0 __strlen_asimd ()
+   #1 Get_File_Spec () at file_spec.h:53
+   ```
+   `Get_File_Spec()` does `user = getenv("USER"); ... strlen(user)` — **no NULL check**.
+   Colab (and Docker) don't set `USER`, so `getenv` returns NULL and `strlen(NULL)`
+   segfaults. On the instructor's server `USER=ye` existed, so it never crashed there.
+5. **Fix: `os.environ["USER"] = "root"`.** One line. With it, the stock GIZA++ binary
+   runs to completion — verified end-to-end in the container.
+
+Bonus finding from the same run: `experiment.perl` line 176 calls ImageMagick's
+`convert` **unconditionally** (`-no-graph` only suppresses the interactive viewer at
+line 178), so `imagemagick` + `graphviz` were added to STEP 1's apt installs — which
+also means the EMS pipeline graphs the tutorial wants to display now actually exist.
+
+**Lessons:**
+- **When a shared notebook fails mysteriously, replicate the whole pipeline somewhere
+  you control.** A container gives you what Colab doesn't: extractable logs, `gdb`,
+  and cheap retries.
+- **Follow the log chain down, not the symptom up:** orchestrator log (`run1.log`) →
+  step log (`steps/1/*.STDERR`) → process-level tool (`gdb`). Each level names the
+  next thing to open.
+- **Falsify the obvious theory before acting on it.** "Old code + new compiler" was
+  plausible — one `-O0` rebuild disproved it in two minutes and saved a day of
+  flag-tweaking.
+- **A missing environment variable can be a segfault.** Old C code assumes login shells
+  (`USER`, `HOME`, tty). Minimal environments (Colab, Docker, CI) break those
+  assumptions — and the fix is one `export`, not a patched binary.
+
+## Part 3.11 — Last mile: the Moses config really was missing two things
+
+With `USER=root` fixed, the container rerun got through GIZA++, phrase extraction,
+LM, tuning, and decoding — then died at the *final scoring stage*:
+`ERROR: you need to define GENERAL:wrapping-frame`. And even if it hadn't, there was a
+second gap: the tutorial reads `evaluation/test.multi-bleu.1`, but the embedded config
+never defined `multi-bleu`, so that file would never exist.
+
+A telling clue from the instructor's own narration: *"it shows red about nist-bleu,
+but don't worry"* — meaning the nist-bleu chain failed **even on their server**; their
+score always came from multi-bleu. Their private config evidently had it; the shared
+kc-my template we embedded did not.
+
+**The fix (three additions to `config.baseline`):**
+```ini
+[EVALUATION]
+multi-bleu = $moses-script-dir/generic/multi-bleu.perl
+wrapping-frame = $myrk-data/test-sgm/test.$input-extension.src.sgm
+
+[EVALUATION:test]
+input-sgm = $myrk-data/test-sgm/test.$input-extension.src.sgm
+reference-sgm = $myrk-data/test-sgm/test.$output-extension.ref.sgm
+```
+plus staging the SGM files into `clean-data/test-sgm/` — which finally closes the loop
+on the tutorial's SGM section: *this* is what those generated `.sgm` files were always
+for (and the `test-sgm` folder name is the very one from the instructor's deliberate
+typo lesson).
+
+One scoping gotcha along the way: `wrapping-frame = $input-sgm` fails with
+`UNKNOWN PARAMETER` — EMS resolves `$variables` in `[EVALUATION]` against GENERAL-level
+settings, so the frame must be spelled with GENERAL-scope variables
+(`$myrk-data`, `$input-extension`), not instance-section ones.
+
+**Verified result (clean Ubuntu 22.04 container, full pipeline end-to-end):**
+```
+my-rk : BLEU = 56.03   (BP=1.000, hyp_len=665, ref_len=661)
+rk-my : BLEU = 56.17   (BP=0.998, hyp_len=666, ref_len=667)
+```
+Compare the instructor's 11.77 for Myanmar–Thai: same pipeline, sister-language pair —
+five times the score. BLEU only means something relative to the language pair.
+
+**Lessons:**
+- **"Configure the configs" was the right instinct** — but the missing pieces were
+  findable only by running to the failure: a missing *output setting* (multi-bleu)
+  produces no error at all, just a missing file at the end.
+- **Read the tool's spec when wiring configs** (`experiment.meta` defines every step's
+  inputs and `ignore-unless` guards) — it says precisely which setting activates which
+  step, no guessing needed.
+- **Artifacts the tutorial creates should be traced to where they're consumed.** The
+  SGM files were generated and then never used — a dangling thread that turned out to
+  be the missing evaluation wiring.
+
 ---
 
 ## Part 4 — What to learn from this exercise (the transferable skills)
